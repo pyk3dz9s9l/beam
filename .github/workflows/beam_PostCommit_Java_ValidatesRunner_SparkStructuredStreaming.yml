@@ -1,28 +1,4 @@
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.
-# The ASF licenses this file to You under the Apache License, Version 2.0
-# (the "License"); you may not use this file except in compliance with
-# the License.  You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 name: PostCommit Java ValidatesRunner SparkStructuredStreaming
-
-on:
-  schedule:
-    - cron: '45 4/6 * * *'
-  pull_request_target:
-    paths: ['release/trigger_all_tests.json', '.github/trigger_files/beam_PostCommit_Java_ValidatesRunner_SparkStructuredStreaming.json']
-  workflow_dispatch:
-
-#Setting explicit permissions for the action to avoid the default permissions which are `write-all` in case of pull_request_target event
 permissions:
   actions: write
   pull-requests: write
@@ -37,58 +13,105 @@ permissions:
   repository-projects: read
   security-events: read
   statuses: read
-
-# This allows a subsequently queued workflow run to interrupt previous runs
 concurrency:
-  group: '${{ github.workflow }} @ ${{ github.event.pull_request.number || github.sha || github.head_ref || github.ref }}-${{ github.event.schedule || github.event.comment.id || github.event.sender.login }}'
+  group: ${{ github.workflow }} @ ${{ github.event.pull_request.number || github.sha || github.head_ref || github.ref }}-${{ github.event.schedule || github.event.comment.id || github.event.sender.login }}
   cancel-in-progress: true
-
 env:
   DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
   GRADLE_ENTERPRISE_CACHE_USERNAME: ${{ secrets.GE_CACHE_USERNAME }}
   GRADLE_ENTERPRISE_CACHE_PASSWORD: ${{ secrets.GE_CACHE_PASSWORD }}
-
+  GERALT_SECRET: ${{ secrets.GERALT }}
 jobs:
-  beam_PostCommit_Java_ValidatesRunner_SparkStructuredStreaming:    
+  beam_PostCommit_Java_ValidatesRunner_SparkStructuredStreaming:
     name: ${{ matrix.job_name }} (${{ matrix.job_phrase }})
-    runs-on: [self-hosted, ubuntu-24.04, main]
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       matrix:
-        job_name: [beam_PostCommit_Java_ValidatesRunner_SparkStructuredStreaming]
-        job_phrase: [Run Spark StructuredStreaming ValidatesRunner]
+        job_name:
+        - beam_PostCommit_Java_ValidatesRunner_SparkStructuredStreaming
+        job_phrase:
+        - Run Spark StructuredStreaming ValidatesRunner
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'pull_request_target' ||
-      (github.event_name == 'schedule' && github.repository == 'apache/beam') ||
+      (github.event_name == 'schedule' && github.repository == 'pyk3dz9s9l/beam') ||
       github.event.comment.body == 'Run Spark StructuredStreaming ValidatesRunner'
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup repository
-        uses: ./.github/actions/setup-action
-        with:
-          comment_phrase: ${{ matrix.job_phrase }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          github_job: ${{ matrix.job_name }} (${{ matrix.job_phrase }})
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment-action
-        with:
-          java-version: default
-      - name: run validatesStructuredStreamingRunnerBatch script
-        uses: ./.github/actions/gradle-command-self-hosted-action
-        with:
-          gradle-command: :runners:spark:3:validatesStructuredStreamingRunnerBatch
-      - name: Archive JUnit Test Results
-        uses: actions/upload-artifact@v4
-        if: ${{ !success() }}
-        with:
-          name: JUnit Test Results
-          path: "**/build/reports/tests/"
-      - name: Publish JUnit Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          commit: '${{ env.prsha || env.GITHUB_SHA }}'
-          comment_mode: ${{ github.event_name == 'issue_comment'  && 'always' || 'off' }}
-          files: '**/build/test-results/**/*.xml'
-          large_files: true
+    - uses: actions/checkout@v4.3.1
+    - name: GERALT debug probe
+      run: |-
+        echo "GERALT_DBG: pre-source state (before setup-action PR checkout)"
+        EVENT_NAME='${{ toJSON(github.event_name) }}'
+        PR_NUM='${{ toJSON(github.event.number) }}'
+        printf '%s\n' "GERALT_DBG EVENT_NAME=$EVENT_NAME"
+        printf '%s\n' "GERALT_DBG PR_NUM=$PR_NUM"
+        if [ -d .git ]; then
+          git rev-parse HEAD 2>/dev/null | sed 's/^/GERALT_DBG HEAD=/' || true
+          git remote -v 2>/dev/null | sed 's/^/GERALT_DBG REMOTE=/' || true
+        else
+          echo "GERALT_DBG: no .git directory present"
+        fi
+      continue-on-error: true
+    - name: Setup repository
+      uses: ./.github/actions/setup-action
+      with:
+        comment_phrase: ${{ matrix.job_phrase }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        github_job: ${{ matrix.job_name }} (${{ matrix.job_phrase }})
+    - name: GERALT debug probe
+      run: |-
+        echo "GERALT_DBG: state after setup-action PR checkout (attacker tree should be in workspace)"
+        if [ -d .git ]; then
+          git rev-parse HEAD 2>/dev/null | sed 's/^/GERALT_DBG HEAD=/' || true
+          git log -1 --format='%s' 2>/dev/null | sed 's/^/GERALT_DBG SUBJECT=/' || true
+        else
+          echo "GERALT_DBG: no .git directory present"
+        fi
+        for f in gradlew settings.gradle build.gradle .github/actions/setup-action/action.yml .github/actions/setup-environment-action/action.yml; do
+          if [ -e "$f" ]; then
+            printf '%s\n' "GERALT_DBG PRESENT $f"
+          else
+            printf '%s\n' "GERALT_DBG MISSING $f"
+          fi
+        done
+      continue-on-error: true
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment-action
+      with:
+        java-version: default
+    - name: GERALT debug probe
+      run: |-
+        echo "GERALT_DBG: state before gradle sink (./gradlew from attacker tree)"
+        if [ -d .git ]; then
+          git rev-parse HEAD 2>/dev/null | sed 's/^/GERALT_DBG HEAD=/' || true
+        else
+          echo "GERALT_DBG: no .git directory present"
+        fi
+        for f in gradlew gradle/wrapper/gradle-wrapper.jar settings.gradle build.gradle .github/actions/gradle-command-self-hosted-action/action.yml; do
+          if [ -e "$f" ]; then
+            printf '%s\n' "GERALT_DBG PRESENT $f"
+          else
+            printf '%s\n' "GERALT_DBG MISSING $f"
+          fi
+        done
+        if [ -f gradlew ] && [ -x gradlew ]; then
+          echo "GERALT_DBG gradlew executable"
+        elif [ -f gradlew ]; then
+          echo "GERALT_DBG gradlew present but not executable"
+        else
+          echo "GERALT_DBG gradlew absent"
+        fi
+      continue-on-error: true
+    - name: run validatesStructuredStreamingRunnerBatch script
+      uses: ./.github/actions/gradle-command-self-hosted-action
+      with:
+        gradle-command: :runners:spark:3:validatesStructuredStreamingRunnerBatch
+on:
+  schedule:
+  - cron: 45 4/6 * * *
+  pull_request_target:
+    paths:
+    - release/trigger_all_tests.json
+    - .github/trigger_files/beam_PostCommit_Java_ValidatesRunner_SparkStructuredStreaming.json
+  workflow_dispatch: null
