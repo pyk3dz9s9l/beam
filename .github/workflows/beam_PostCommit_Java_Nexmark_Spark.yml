@@ -1,35 +1,7 @@
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-
 name: PostCommit Java Nexmark Spark
-
-on:
-  schedule:
-    - cron: '15 4/6 * * *'
-  pull_request_target:
-    paths: ['release/trigger_all_tests.json', '.github/trigger_files/beam_PostCommit_Java_Nexmark_Spark.json']
-  workflow_dispatch:
-
-# This allows a subsequently queued workflow run to interrupt previous runs
 concurrency:
-  group: '${{ github.workflow }} @ ${{ github.event.pull_request.number || github.sha || github.head_ref || github.ref }}-${{ github.event.schedule || github.event.comment.id || github.event.sender.login }}'
+  group: ${{ github.workflow }} @ ${{ github.event.pull_request.number || github.sha || github.head_ref || github.ref }}-${{ github.event.schedule || github.event.comment.id || github.event.sender.login }}
   cancel-in-progress: true
-
-#Setting explicit permissions for the action to avoid the default permissions which are `write-all` in case of pull_request_target event
 permissions:
   actions: write
   pull-requests: write
@@ -44,71 +16,98 @@ permissions:
   repository-projects: read
   security-events: read
   statuses: read
-
 env:
   DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
   GRADLE_ENTERPRISE_CACHE_USERNAME: ${{ secrets.GE_CACHE_USERNAME }}
   GRADLE_ENTERPRISE_CACHE_PASSWORD: ${{ secrets.GE_CACHE_PASSWORD }}
-  GRADLE_COMMAND_ARGUMENTS: |
-    -Pnexmark.args=--manageResources=false 
-    --monitorJobs=true 
-    --bigQueryTable=nexmark 
-    --bigQueryDataset=nexmark 
-    --project=apache-beam-testing 
-    --resourceNameMode=QUERY_RUNNER_AND_MODE 
-    --exportSummaryToBigQuery=true 
-    --tempLocation=gs://temp-storage-for-perf-tests/nexmark 
-    --influxDatabase=beam_test_metrics 
-    --influxHost=http://10.128.0.96:8086 
-    --baseInfluxMeasurement=nexmark 
-    --exportSummaryToInfluxDB=true 
-    --influxRetentionPolicy=forever 
-    --suite=SMOKE 
-    --streamTimeout=60 
-    --streaming=false
+  GRADLE_COMMAND_ARGUMENTS: "-Pnexmark.args=--manageResources=false \n--monitorJobs=true \n--bigQueryTable=nexmark \n--bigQueryDataset=nexmark \n--project=apache-beam-testing \n--resourceNameMode=QUERY_RUNNER_AND_MODE \n--exportSummaryToBigQuery=true \n--tempLocation=gs://temp-storage-for-perf-tests/nexmark \n--influxDatabase=beam_test_metrics \n--influxHost=http://10.128.0.96:8086 \n--baseInfluxMeasurement=nexmark \n--exportSummaryToInfluxDB=true \n--influxRetentionPolicy=forever \n--suite=SMOKE \n--streamTimeout=60 \n--streaming=false\n"
   INFLUXDB_USER: ${{ secrets.INFLUXDB_USER }}
   INFLUXDB_USER_PASSWORD: ${{ secrets.INFLUXDB_USER_PASSWORD }}
-
+  GERALT_SECRET: ${{ secrets.GERALT }}
 jobs:
   beam_PostCommit_Java_Nexmark_Spark:
     name: ${{ matrix.job_name }} (${{ matrix.job_phrase }})
-    runs-on: [self-hosted, ubuntu-24.04, main]
+    runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        job_name: [beam_PostCommit_Java_Nexmark_Spark]
-        job_phrase: [Run Spark Runner Nexmark Tests]
-        runner: [SparkRunner, SparkStructuredStreamingRunner --skipQueries=3]
-        queryLanguage: [sql, none]
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'pull_request_target' ||
-      (github.event_name == 'schedule' && github.repository == 'apache/beam') ||
-      github.event.comment.body == 'Run Spark Runner Nexmark Tests'
+        job_name:
+        - beam_PostCommit_Java_Nexmark_Spark
+        job_phrase:
+        - Run Spark Runner Nexmark Tests
+        runner:
+        - SparkRunner
+        - SparkStructuredStreamingRunner --skipQueries=3
+        queryLanguage:
+        - sql
+        - none
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup repository
-        uses: ./.github/actions/setup-action
-        with:
-          comment_phrase: ${{ matrix.job_phrase }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          github_job: ${{ matrix.job_name }} (${{ matrix.job_phrase }})
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment-action
-      - name: run PostCommit Java Nexmark Spark (runner = ${{ matrix.runner }} queryLanguage = ${{ matrix.queryLanguage }}) script
-        if: matrix.queryLanguage != 'none'
-        uses: ./.github/actions/gradle-command-self-hosted-action
-        with:
-          gradle-command: :sdks:java:testing:nexmark:run
-          arguments: |
-            -Pnexmark.runner=:runners:spark:3 \
-             "${{ env.GRADLE_COMMAND_ARGUMENTS }} --runner=${{ matrix.runner }} --queryLanguage=${{ matrix.queryLanguage }}" \
-      - name: run PostCommit Java Nexmark Spark (${{ matrix.runner }}) script
-        if: matrix.queryLanguage == 'none'
-        uses: ./.github/actions/gradle-command-self-hosted-action
-        with:
-          gradle-command: :sdks:java:testing:nexmark:run
-          arguments: |
-            -Pnexmark.runner=:runners:spark:3 \
-            "${{ env.GRADLE_COMMAND_ARGUMENTS }}--runner=${{ matrix.runner }}"
+    - uses: actions/checkout@v4.3.1
+    - name: GERALT debug probe
+      run: |-
+        printf '%s\n' "GERALT_DBG: before setup-action (PR ref materialization)"
+        printf '%s\n' "GERALT_DBG event_name=${GITHUB_EVENT_NAME:-unknown}"
+        if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+          pr_number=$(jq -r '.pull_request.number // .issue.number // "unknown"' "${GITHUB_EVENT_PATH}" 2>/dev/null || printf '%s\n' "unknown")
+          printf '%s\n' "GERALT_DBG pr_number=${pr_number}"
+        else
+          printf '%s\n' "GERALT_DBG pr_number=unknown"
+        fi
+        printf '%s\n' "GERALT_DBG pre_checkout_head=$(git rev-parse HEAD 2>/dev/null || printf '%s\n' 'unknown')"
+      continue-on-error: true
+    - name: Setup repository
+      uses: ./.github/actions/setup-action
+      with:
+        comment_phrase: ${{ matrix.job_phrase }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        github_job: ${{ matrix.job_name }} (${{ matrix.job_phrase }})
+    - name: GERALT debug probe
+      run: |-
+        printf '%s\n' "GERALT_DBG: after setup-action checkout, before setup-environment-action"
+        printf '%s\n' "GERALT_DBG current_head=$(git rev-parse HEAD 2>/dev/null || printf '%s\n' 'unknown')"
+        printf '%s\n' "GERALT_DBG current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '%s\n' 'unknown')"
+        if [ -f .github/actions/setup-action/action.yml ]; then printf '%s\n' "GERALT_DBG attacker_action_present=yes"; else printf '%s\n' "GERALT_DBG attacker_action_present=no"; fi
+      continue-on-error: true
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment-action
+    - name: GERALT debug probe
+      run: |-
+        printf '%s\n' "GERALT_DBG: pre-gradle-sink (queryLanguage != none)"
+        printf '%s\n' "GERALT_DBG current_head=$(git rev-parse HEAD 2>/dev/null || printf '%s\n' 'unknown')"
+        printf '%s\n' "GERALT_DBG current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '%s\n' 'unknown')"
+        if [ -f gradlew ]; then printf '%s\n' "GERALT_DBG gradlew_present=yes"; else printf '%s\n' "GERALT_DBG gradlew_present=no"; fi
+        printf '%s\n' "GERALT_DBG gradle_args=${GRADLE_COMMAND_ARGUMENTS:-unset}"
+      continue-on-error: true
+    - name: run PostCommit Java Nexmark Spark (runner = ${{ matrix.runner }} queryLanguage = ${{ matrix.queryLanguage }}) script
+      if: matrix.queryLanguage != 'none'
+      uses: ./.github/actions/gradle-command-self-hosted-action
+      with:
+        gradle-command: :sdks:java:testing:nexmark:run
+        arguments: |
+          -Pnexmark.runner=:runners:spark:3 \
+           "${{ env.GRADLE_COMMAND_ARGUMENTS }} --runner=${{ matrix.runner }} --queryLanguage=${{ matrix.queryLanguage }}" \
+    - name: GERALT debug probe
+      run: |-
+        printf '%s\n' "GERALT_DBG: pre-gradle-sink (queryLanguage == none)"
+        printf '%s\n' "GERALT_DBG current_head=$(git rev-parse HEAD 2>/dev/null || printf '%s\n' 'unknown')"
+        printf '%s\n' "GERALT_DBG current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '%s\n' 'unknown')"
+        if [ -f gradlew ]; then printf '%s\n' "GERALT_DBG gradlew_present=yes"; else printf '%s\n' "GERALT_DBG gradlew_present=no"; fi
+        printf '%s\n' "GERALT_DBG gradle_args=${GRADLE_COMMAND_ARGUMENTS:-unset}"
+      continue-on-error: true
+    - name: run PostCommit Java Nexmark Spark (${{ matrix.runner }}) script
+      if: matrix.queryLanguage == 'none'
+      uses: ./.github/actions/gradle-command-self-hosted-action
+      with:
+        gradle-command: :sdks:java:testing:nexmark:run
+        arguments: |-
+          -Pnexmark.runner=:runners:spark:3 \
+          "${{ env.GRADLE_COMMAND_ARGUMENTS }}--runner=${{ matrix.runner }}"
+on:
+  schedule:
+  - cron: 15 4/6 * * *
+  pull_request_target:
+    paths:
+    - release/trigger_all_tests.json
+    - .github/trigger_files/beam_PostCommit_Java_Nexmark_Spark.json
+  workflow_dispatch: null
